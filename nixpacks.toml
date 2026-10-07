@@ -1,0 +1,6 @@
+[phases.setup]
+nixpkgsArchive = "d99b013d5d1931ad77fe3912ed218170dec5d9a4"
+nixPkgs = ["...", "postgresql_18"]
+
+[phases.build]
+cmds = ["python manage.py collectstatic --noinput"]

@@ -1,0 +1,17 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt && python manage.py collectstatic --noinput"
+
+[deploy]
+preDeployCommand = "python manage.py migrate --noinput"
+startCommand = "gunicorn core.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --worker-class gevent --worker-connections 1000 --timeout 120 --keep-alive 5 --max-requests 1000 --max-requests-jitter 50 --log-level info --access-logfile - --error-logfile -"
+numReplicas = 1
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+healthCheckPath = "/api/health/"
+healthCheckTimeout = 100
+
+[[deploy.regions]]
+region = "us-east"
+cpuLimit = 250
+memoryLimit = 256
