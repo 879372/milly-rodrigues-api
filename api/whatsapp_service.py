@@ -19,17 +19,20 @@ def _portal_url(appointment):
 
 
 def _render_template(template, appointment, review_url=''):
+    local_dt = timezone.localtime(appointment.date_time)
     service_names = ", ".join(s.name for s in appointment.services.all()) or "seu procedimento"
     professional_name = (
         appointment.barber.first_name if appointment.barber and appointment.barber.first_name
         else 'Milly Rodrigues'
     )
     values = {
-        '{nome}': appointment.client.first_name or 'Cliente',
+        '{nome}': (appointment.client.first_name if appointment.client else '') or 'Cliente',
         '{servico}': service_names,
         '{profissional}': professional_name,
-        '{data}': timezone.localtime(appointment.date_time).strftime('%d/%m/%Y'),
+        '{data}': local_dt.strftime('%d/%m/%Y'),
+        '{hora}': local_dt.strftime('%H:%M'),
         '{link_agendamento}': f"{portal_base_url()}/agendar",
+        '{link_gerenciamento}': _portal_url(appointment),
         '{link_avaliacao}': review_url,
     }
     message = template
@@ -107,75 +110,47 @@ class WhatsAppService:
 
     @classmethod
     def send_confirmation(cls, appointment):
-        from django.utils import timezone
-        local_dt = timezone.localtime(appointment.date_time)
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        barber_name = appointment.barber.first_name if appointment.barber else 'Milly Rodrigues'
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        manage_url = _portal_url(appointment)
-        
-        msg = (
-            f"✅ *Agendamento Confirmado*\n\n"
-            f"Olá {appointment.client.first_name if appointment.client else 'Cliente'},\n"
-            f"Seu agendamento para *{service_names}* foi confirmado!\n\n"
-            f"📅 *Data:* {local_dt.strftime('%d/%m')}\n"
-            f"⏰ *Hora:* {local_dt.strftime('%H:%M')}\n"
-            f"✨ *Profissional:* {barber_name}\n\n"
-            f"📍 *Local:* Milly Rodrigues — Depilação & Estética\n"
-            f"⚠️ *Importante:* Pedimos a gentileza de chegar com *10 minutos de antecedência*.\n\n"
-            f"🔗 *Veja ou cancele em:* {manage_url}\n\n"
-            f"Esperamos por você! ✨"
+        from .models import MessageAutomationConfig
+        config = MessageAutomationConfig.load()
+        if not config.confirmation_enabled:
+            return True
+        return cls.send_message(
+            appointment, 'confirmation',
+            _render_template(config.confirmation_template, appointment),
         )
-        return cls.send_message(appointment, 'confirmation', msg)
 
     @classmethod
     def send_reminder(cls, appointment):
-        from django.utils import timezone
-        import re
-        local_dt = timezone.localtime(appointment.date_time)
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        barber_name = appointment.barber.first_name if appointment.barber else 'Milly Rodrigues'
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        manage_url = _portal_url(appointment)
-        
-        msg = (
-            f"⏰ *Lembrete de Agendamento*\n\n"
-            f"Olá! Passando para lembrar do seu horário hoje:\n\n"
-            f"✨ *{service_names}*\n"
-            f"🕒 às *{local_dt.strftime('%H:%M')}*\n"
-            f"com *{barber_name}*\n\n"
-            f"📍 *Lembrete:* Chegue com 10 minutos de antecedência.\n\n"
-            f"🔗 *Gerenciar agendamento:* {manage_url}\n\n"
-            f"Até logo! ✨"
+        from .models import MessageAutomationConfig
+        config = MessageAutomationConfig.load()
+        if not config.appointment_reminder_enabled:
+            return True
+        return cls.send_message(
+            appointment, 'reminder',
+            _render_template(config.appointment_reminder_template, appointment),
         )
-        return cls.send_message(appointment, 'reminder', msg)
 
     @classmethod
     def send_cancellation(cls, appointment):
-        from django.utils import timezone
-        local_dt = timezone.localtime(appointment.date_time)
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        msg = (
-            f"❌ *Agendamento Cancelado*\n\n"
-            f"Olá, o seu agendamento para *{service_names}* no dia {local_dt.strftime('%d/%m às %H:%M')} foi cancelado.\n\n"
-            f"Caso queira agendar um novo horário, acesse: {portal_base_url()}/agendar"
+        from .models import MessageAutomationConfig
+        config = MessageAutomationConfig.load()
+        if not config.cancellation_enabled:
+            return True
+        return cls.send_message(
+            appointment, 'cancellation',
+            _render_template(config.cancellation_template, appointment),
         )
-        return cls.send_message(appointment, 'cancellation', msg)
 
     @classmethod
     def send_post_visit(cls, appointment):
-        import re
-        service_names = ", ".join(s.name for s in appointment.services.all()) if getattr(appointment, "services", None) and appointment.services.exists() else "Serviços"
-        manage_url = _portal_url(appointment)
-        
-        msg = (
-            f"⭐ *Obrigado pela visita!*\n\n"
-            f"Olá {appointment.client.first_name if appointment.client else 'Cliente'},\n"
-            f"Obrigado por escolher a Milly Rodrigues! Esperamos que tenha gostado do serviço *{service_names}*.\n\n"
-            f"🔗 *Acompanhe seu histórico:* {manage_url}\n\n"
-            f"Até a próxima! ✨"
+        from .models import MessageAutomationConfig
+        config = MessageAutomationConfig.load()
+        if not config.thank_you_enabled:
+            return True
+        return cls.send_message(
+            appointment, 'thank_you',
+            _render_template(config.thank_you_template, appointment),
         )
-        return cls.send_message(appointment, 'confirmation', msg)
 
     @classmethod
     def send_follow_up(cls, appointment, template):

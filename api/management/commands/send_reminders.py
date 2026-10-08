@@ -95,11 +95,14 @@ class Command(BaseCommand):
         # Buscar agendamentos confirmados para a próxima 1 hora
         upcoming_limit = now + timedelta(hours=1)
         
-        appointments = Appointment.objects.filter(
-            status='confirmed',
-            date_time__gte=now,
-            date_time__lte=upcoming_limit
-        )
+        automation_config = MessageAutomationConfig.load()
+        appointments = Appointment.objects.none()
+        if automation_config.appointment_reminder_enabled:
+            appointments = Appointment.objects.filter(
+                status='confirmed',
+                date_time__gte=now,
+                date_time__lte=upcoming_limit
+            )
 
         sent_count = 0
         for app in appointments:

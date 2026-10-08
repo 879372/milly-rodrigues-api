@@ -318,6 +318,10 @@ class MessageAutomationConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = MessageAutomationConfig
         fields = (
+            'confirmation_enabled', 'confirmation_template',
+            'appointment_reminder_enabled', 'appointment_reminder_template',
+            'cancellation_enabled', 'cancellation_template',
+            'thank_you_enabled', 'thank_you_template',
             'follow_up_enabled', 'follow_up_template',
             'review_enabled', 'review_template', 'google_review_url',
             'return_enabled', 'return_template', 'updated_at',
@@ -326,6 +330,10 @@ class MessageAutomationConfigSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         templates = (
+            ('confirmation_template', 'confirmação'),
+            ('appointment_reminder_template', 'lembrete do horário'),
+            ('cancellation_template', 'cancelamento'),
+            ('thank_you_template', 'agradecimento'),
             ('follow_up_template', 'acompanhamento de 24 horas'),
             ('review_template', 'avaliação de 48 horas'),
             ('return_template', 'retorno de 30 dias'),

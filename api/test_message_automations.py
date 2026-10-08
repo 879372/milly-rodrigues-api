@@ -13,7 +13,7 @@ from .models import (
     Service,
     User,
 )
-from .whatsapp_service import _render_template
+from .whatsapp_service import WhatsAppService, _render_template
 
 
 class MessageAutomationConfigApiTests(TestCase):
@@ -27,7 +27,7 @@ class MessageAutomationConfigApiTests(TestCase):
         response = self.client.patch('/api/v1/message-automation-config/', {
             'follow_up_template': 'Olá {nome}, como você está?',
             'google_review_url': 'https://g.page/r/exemplo/review',
-        }, format='json')
+        }, format='json', secure=True)
 
         self.assertEqual(response.status_code, 200)
         config = MessageAutomationConfig.load()
@@ -36,7 +36,7 @@ class MessageAutomationConfigApiTests(TestCase):
 
     def test_only_admin_can_read_configuration(self):
         self.client.force_authenticate(self.professional)
-        response = self.client.get('/api/v1/message-automation-config/')
+        response = self.client.get('/api/v1/message-automation-config/', secure=True)
         self.assertEqual(response.status_code, 403)
 
 
@@ -127,14 +127,48 @@ class MessageAutomationScheduleTests(TestCase):
     def test_template_variables_are_replaced(self):
         appointment = self._appointment(days_ago=2, appointment_days_ago=2)
         message = _render_template(
-            'Oi {nome}: {servico}, {profissional}, {data}, {link_agendamento}, {link_avaliacao}',
+            'Oi {nome}: {servico}, {profissional}, {data} {hora}, {link_agendamento}, {link_gerenciamento}, {link_avaliacao}',
             appointment,
             review_url='https://google.test/review',
         )
 
         self.assertIn('Oi Ana: Depilação, Milly', message)
+        self.assertIn(timezone.localtime(appointment.date_time).strftime('%H:%M'), message)
+        self.assertIn('/meus-agendamentos?token=', message)
         self.assertIn('https://google.test/review', message)
         self.assertNotIn('{nome}', message)
+
+    def test_operational_messages_use_editable_templates_and_distinct_types(self):
+        appointment = self._appointment(days_ago=1, appointment_days_ago=1)
+        self.config.confirmation_template = 'CONF {nome} {hora}'
+        self.config.appointment_reminder_template = 'LEMBRETE {servico}'
+        self.config.cancellation_template = 'CANCELOU {link_agendamento}'
+        self.config.thank_you_template = 'OBRIGADO {nome}'
+        self.config.save()
+
+        with patch('api.whatsapp_service.WhatsAppService.send_message', return_value=True) as send:
+            WhatsAppService.send_confirmation(appointment)
+            WhatsAppService.send_reminder(appointment)
+            WhatsAppService.send_cancellation(appointment)
+            WhatsAppService.send_post_visit(appointment)
+
+        self.assertEqual(
+            [call.args[1] for call in send.call_args_list],
+            ['confirmation', 'reminder', 'cancellation', 'thank_you'],
+        )
+        self.assertIn('CONF Ana', send.call_args_list[0].args[2])
+        self.assertIn('LEMBRETE Depilação', send.call_args_list[1].args[2])
+        self.assertIn('/agendar', send.call_args_list[2].args[2])
+        self.assertEqual(send.call_args_list[3].args[2], 'OBRIGADO Ana')
+
+    def test_disabled_operational_message_is_not_sent(self):
+        appointment = self._appointment(days_ago=1, appointment_days_ago=1)
+        self.config.confirmation_enabled = False
+        self.config.save()
+
+        with patch('api.whatsapp_service.WhatsAppService.send_message') as send:
+            self.assertTrue(WhatsAppService.send_confirmation(appointment))
+        send.assert_not_called()
 
     def test_completion_timestamp_tracks_status(self):
         appointment = Appointment.objects.create(

@@ -21,5 +21,5 @@ def trigger_notifications(sender, instance, created, **kwargs):
         
         elif instance.status == 'completed':
             # Enviar agradecimento pós-visita apenas se não houver um enviado com sucesso
-            if not Notification.objects.filter(appointment=instance, type='confirmation', status='sent', message__icontains='Obrigado').exists():
+            if not Notification.objects.filter(appointment=instance, type='thank_you', status='sent').exists():
                 WhatsAppService.send_post_visit(instance)

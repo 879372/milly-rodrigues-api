@@ -227,6 +227,7 @@ class Notification(models.Model):
         ('follow_up', 'Acompanhamento pós-procedimento'),
         ('review_request', 'Pedido de avaliação'),
         ('return_reminder', 'Lembrete de retorno'),
+        ('thank_you', 'Agradecimento'),
     )
     STATUS_CHOICES = (
         ('pending', 'Pendente'),
@@ -380,7 +381,49 @@ class SpecialPriceConfig(SingletonConfigModel):
 
 
 class MessageAutomationConfig(SingletonConfigModel):
-    """Mensagens automáticas enviadas após a conclusão de um atendimento."""
+    """Templates de todas as mensagens automáticas enviadas pelo WhatsApp."""
+
+    confirmation_enabled = models.BooleanField(default=True)
+    confirmation_template = models.TextField(default=(
+        "✅ *Agendamento Confirmado*\n\n"
+        "Olá {nome},\n"
+        "Seu agendamento para *{servico}* foi confirmado!\n\n"
+        "📅 *Data:* {data}\n"
+        "⏰ *Hora:* {hora}\n"
+        "✨ *Profissional:* {profissional}\n\n"
+        "📍 *Local:* Milly Rodrigues — Depilação & Estética\n"
+        "⚠️ *Importante:* Pedimos a gentileza de chegar com *10 minutos de antecedência*.\n\n"
+        "🔗 *Veja ou cancele em:* {link_gerenciamento}\n\n"
+        "Esperamos por você! ✨"
+    ))
+
+    appointment_reminder_enabled = models.BooleanField(default=True)
+    appointment_reminder_template = models.TextField(default=(
+        "⏰ *Lembrete de Agendamento*\n\n"
+        "Olá {nome}! Passando para lembrar do seu horário hoje:\n\n"
+        "✨ *{servico}*\n"
+        "🕒 às *{hora}*\n"
+        "com *{profissional}*\n\n"
+        "📍 *Lembrete:* Chegue com 10 minutos de antecedência.\n\n"
+        "🔗 *Gerenciar agendamento:* {link_gerenciamento}\n\n"
+        "Até logo! ✨"
+    ))
+
+    cancellation_enabled = models.BooleanField(default=True)
+    cancellation_template = models.TextField(default=(
+        "❌ *Agendamento Cancelado*\n\n"
+        "Olá {nome}, o seu agendamento para *{servico}* no dia {data} às {hora} foi cancelado.\n\n"
+        "Caso queira agendar um novo horário, acesse: {link_agendamento}"
+    ))
+
+    thank_you_enabled = models.BooleanField(default=True)
+    thank_you_template = models.TextField(default=(
+        "⭐ *Obrigado pela visita!*\n\n"
+        "Olá {nome},\n"
+        "Obrigado por escolher a Milly Rodrigues! Esperamos que tenha gostado do serviço *{servico}*.\n\n"
+        "🔗 *Acompanhe seu histórico:* {link_gerenciamento}\n\n"
+        "Até a próxima! ✨"
+    ))
 
     follow_up_enabled = models.BooleanField(default=True)
     follow_up_template = models.TextField(default=(

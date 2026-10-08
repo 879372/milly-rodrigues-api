@@ -21,7 +21,11 @@ class SpecialPriceConfigAdmin(admin.ModelAdmin):
 
 @admin.register(MessageAutomationConfig)
 class MessageAutomationConfigAdmin(admin.ModelAdmin):
-    list_display = ('__str__', 'follow_up_enabled', 'review_enabled', 'return_enabled', 'updated_at')
+    list_display = (
+        '__str__', 'confirmation_enabled', 'appointment_reminder_enabled',
+        'cancellation_enabled', 'thank_you_enabled', 'follow_up_enabled',
+        'review_enabled', 'return_enabled', 'updated_at',
+    )
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
