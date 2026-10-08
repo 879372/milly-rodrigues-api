@@ -17,6 +17,26 @@ def _portal_url(appointment):
     token = make_portal_token(appointment.client_id)
     return f"{base}/meus-agendamentos?token={token}"
 
+
+def _render_template(template, appointment, review_url=''):
+    service_names = ", ".join(s.name for s in appointment.services.all()) or "seu procedimento"
+    professional_name = (
+        appointment.barber.first_name if appointment.barber and appointment.barber.first_name
+        else 'Milly Rodrigues'
+    )
+    values = {
+        '{nome}': appointment.client.first_name or 'Cliente',
+        '{servico}': service_names,
+        '{profissional}': professional_name,
+        '{data}': timezone.localtime(appointment.date_time).strftime('%d/%m/%Y'),
+        '{link_agendamento}': f"{portal_base_url()}/agendar",
+        '{link_avaliacao}': review_url,
+    }
+    message = template
+    for placeholder, value in values.items():
+        message = message.replace(placeholder, value)
+    return message
+
 class WhatsAppService:
     @staticmethod
     def send_message(appointment, message_type, content):
@@ -156,3 +176,27 @@ class WhatsAppService:
             f"Até a próxima! ✨"
         )
         return cls.send_message(appointment, 'confirmation', msg)
+
+    @classmethod
+    def send_follow_up(cls, appointment, template):
+        return cls.send_message(
+            appointment,
+            'follow_up',
+            _render_template(template, appointment),
+        )
+
+    @classmethod
+    def send_review_request(cls, appointment, template, review_url):
+        return cls.send_message(
+            appointment,
+            'review_request',
+            _render_template(template, appointment, review_url=review_url),
+        )
+
+    @classmethod
+    def send_return_reminder(cls, appointment, template):
+        return cls.send_message(
+            appointment,
+            'return_reminder',
+            _render_template(template, appointment),
+        )

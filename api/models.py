@@ -101,7 +101,22 @@ class Appointment(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     history = HistoricalRecords()
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get('update_fields')
+        completed_at_changed = False
+        if self.status == 'completed' and self.completed_at is None:
+            self.completed_at = timezone.now()
+            completed_at_changed = True
+        elif self.status != 'completed' and self.completed_at is not None:
+            self.completed_at = None
+            completed_at_changed = True
+
+        if completed_at_changed and update_fields is not None:
+            kwargs['update_fields'] = set(update_fields) | {'completed_at'}
+        super().save(*args, **kwargs)
 
     def __str__(self):
         services_names = ", ".join([s.name for s in self.services.all()]) if self.pk else ""
@@ -209,6 +224,9 @@ class Notification(models.Model):
         ('confirmation', 'Confirmação'),
         ('reminder', 'Lembrete'),
         ('cancellation', 'Cancelamento'),
+        ('follow_up', 'Acompanhamento pós-procedimento'),
+        ('review_request', 'Pedido de avaliação'),
+        ('return_reminder', 'Lembrete de retorno'),
     )
     STATUS_CHOICES = (
         ('pending', 'Pendente'),
@@ -359,3 +377,42 @@ class SpecialPriceConfig(SingletonConfigModel):
 
     def __str__(self):
         return f"Valores especiais: dias {self.active_days() or 'nenhum'}"
+
+
+class MessageAutomationConfig(SingletonConfigModel):
+    """Mensagens automáticas enviadas após a conclusão de um atendimento."""
+
+    follow_up_enabled = models.BooleanField(default=True)
+    follow_up_template = models.TextField(default=(
+        "Olá {nome}! 💛\n\n"
+        "Passando para saber como você está se sentindo após o procedimento de {servico}. "
+        "Está tudo bem? Se precisar de alguma orientação, estou por aqui."
+    ))
+    follow_up_enabled_at = models.DateTimeField(default=timezone.now)
+
+    review_enabled = models.BooleanField(default=True)
+    review_template = models.TextField(default=(
+        "Olá {nome}! ✨\n\n"
+        "Foi um prazer cuidar de você no seu primeiro procedimento na Milly Rodrigues. "
+        "Sua opinião é muito importante para nós. Você pode deixar sua avaliação aqui?\n\n"
+        "⭐ {link_avaliacao}"
+    ))
+    review_enabled_at = models.DateTimeField(default=timezone.now)
+    google_review_url = models.URLField(max_length=1000, blank=True, default='')
+
+    return_enabled = models.BooleanField(default=True)
+    return_template = models.TextField(default=(
+        "Olá {nome}! 🌷\n\n"
+        "Já se passaram 30 dias desde o seu procedimento de {servico}. "
+        "Está na hora de renovar esse cuidado. Agende seu próximo horário:\n\n"
+        "📅 {link_agendamento}"
+    ))
+    return_enabled_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Configuração de mensagens automáticas'
+        verbose_name_plural = 'Configuração de mensagens automáticas'
+
+    def __str__(self):
+        return 'Mensagens automáticas pós-atendimento'

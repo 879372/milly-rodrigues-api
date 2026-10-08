@@ -44,6 +44,9 @@ class TipDebtTests(APITestCase):
             for debt in debts.data
         ))
 
+        self.appointment.refresh_from_db()
+        self.assertIsNotNone(self.appointment.completed_at)
+
 
 class RoleMatrixTests(APITestCase):
     @classmethod

@@ -1,11 +1,70 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
-from api.models import Appointment, Notification
+from api.models import Appointment, Notification, MessageAutomationConfig
 from api.whatsapp_service import WhatsAppService
 
 class Command(BaseCommand):
-    help = 'Envia lembretes de agendamento via WhatsApp'
+    help = 'Envia lembretes de agendamento e mensagens pós-atendimento via WhatsApp'
+
+    def _due_appointments(self, now, delay, enabled_at, notification_type):
+        return (
+            Appointment.objects.filter(
+                status='completed',
+                completed_at__isnull=False,
+                completed_at__gte=enabled_at,
+                completed_at__lte=now - delay,
+            )
+            .exclude(notifications__type=notification_type, notifications__status='sent')
+            .select_related('client', 'barber')
+            .prefetch_related('services')
+            .order_by('completed_at')
+        )
+
+    def _send_post_service_automations(self, now):
+        cfg = MessageAutomationConfig.load()
+        sent_count = 0
+
+        automations = []
+        if cfg.follow_up_enabled:
+            automations.append((
+                'follow_up', timedelta(hours=24), cfg.follow_up_enabled_at,
+                lambda app: WhatsAppService.send_follow_up(app, cfg.follow_up_template),
+            ))
+        if cfg.review_enabled and cfg.google_review_url.strip():
+            automations.append((
+                'review_request', timedelta(hours=48), cfg.review_enabled_at,
+                lambda app: WhatsAppService.send_review_request(
+                    app, cfg.review_template, cfg.google_review_url.strip()
+                ),
+            ))
+        if cfg.return_enabled:
+            automations.append((
+                'return_reminder', timedelta(days=30), cfg.return_enabled_at,
+                lambda app: WhatsAppService.send_return_reminder(app, cfg.return_template),
+            ))
+
+        for notification_type, delay, enabled_at, sender in automations:
+            for app in self._due_appointments(now, delay, enabled_at, notification_type):
+                if notification_type == 'review_request':
+                    has_previous_procedure = Appointment.objects.filter(
+                        client_id=app.client_id,
+                        status='completed',
+                        date_time__lt=app.date_time,
+                    ).exclude(pk=app.pk).exists()
+                    if has_previous_procedure:
+                        continue
+
+                if sender(app):
+                    sent_count += 1
+                    self.stdout.write(self.style.SUCCESS(
+                        f'{notification_type} enviado para {app.client.first_name}'
+                    ))
+                else:
+                    self.stdout.write(self.style.ERROR(
+                        f'Falha em {notification_type} para {app.client.first_name}'
+                    ))
+        return sent_count
 
     def handle(self, *args, **options):
         # Realizar backup apenas uma vez por dia, entre 03:00 e 03:15 da manhã
@@ -59,4 +118,8 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(self.style.ERROR(f'Falha ao enviar para {app.client.first_name}'))
 
-        self.stdout.write(f'Processo concluído. Lembretes enviados: {sent_count}')
+        post_service_count = self._send_post_service_automations(now)
+        self.stdout.write(
+            f'Processo concluído. Lembretes enviados: {sent_count}. '
+            f'Mensagens pós-atendimento: {post_service_count}.'
+        )

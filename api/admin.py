@@ -4,7 +4,8 @@ from django.contrib.auth.admin import UserAdmin
 from .models import (
     User, Service, Product, Appointment, PaymentMethod,
     Payment, Expense, Goal, WorkingHour, TimeBlock,
-    Notification, ProductSale, Sale, BookingPaymentConfig, SpecialPriceConfig
+    Notification, ProductSale, Sale, BookingPaymentConfig, SpecialPriceConfig,
+    MessageAutomationConfig
 )
 
 
@@ -16,6 +17,11 @@ class BookingPaymentConfigAdmin(admin.ModelAdmin):
 @admin.register(SpecialPriceConfig)
 class SpecialPriceConfigAdmin(admin.ModelAdmin):
     list_display = ('__str__', 'special_price_days', 'updated_at')
+
+
+@admin.register(MessageAutomationConfig)
+class MessageAutomationConfigAdmin(admin.ModelAdmin):
+    list_display = ('__str__', 'follow_up_enabled', 'review_enabled', 'return_enabled', 'updated_at')
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):

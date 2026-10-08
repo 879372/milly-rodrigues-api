@@ -10,13 +10,13 @@ from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
-from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig
+from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig, MessageAutomationConfig
 from .serializers import (
     UserSerializer, PublicBarberSerializer, ServiceSerializer, ProductSerializer,
     AppointmentSerializer, PaymentSerializer, ExpenseSerializer,
     WorkingHourSerializer, TimeBlockSerializer, ProductSaleSerializer,
     GoalSerializer, PaymentMethodSerializer, SaleSerializer, WaitlistEntrySerializer,
-    BookingPaymentConfigSerializer, SpecialPriceConfigSerializer
+    BookingPaymentConfigSerializer, SpecialPriceConfigSerializer, MessageAutomationConfigSerializer
 )
 from .pagination import OptionalPageNumberPagination, paginate_plain_list
 from .permissions import IsAdmin, IsStaff, IsFrontDesk, IsAdminOrReadOnly, IsStaffOrReadOnly, IsAdminOrOwnerBarber
@@ -291,6 +291,23 @@ class SpecialPriceConfigView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(SpecialPriceConfigSerializer(cfg).data)
+
+
+class MessageAutomationConfigView(APIView):
+    """Configuração administrativa das mensagens automáticas pós-atendimento."""
+
+    permission_classes = [IsAdmin]
+
+    def get(self, request):
+        cfg = MessageAutomationConfig.load()
+        return Response(MessageAutomationConfigSerializer(cfg).data)
+
+    def patch(self, request):
+        cfg = MessageAutomationConfig.load()
+        serializer = MessageAutomationConfigSerializer(cfg, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(MessageAutomationConfigSerializer(cfg).data)
 
 
 class UserViewSet(viewsets.ModelViewSet):

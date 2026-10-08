@@ -4,7 +4,7 @@ from .views import (
     UserViewSet, ServiceViewSet, ProductViewSet, 
     AppointmentViewSet, PaymentViewSet, ExpenseViewSet,
     DashboardView, WorkingHourViewSet, TimeBlockViewSet, ProductSaleViewSet, GoalViewSet, FinancialSummaryView, PaymentMethodViewSet, SaleViewSet, GlobalHistoryView, DebtsView, ClientSpendingView, WaitlistViewSet,
-    BookingConfigView, SpecialPriceConfigView
+    BookingConfigView, SpecialPriceConfigView, MessageAutomationConfigView
 )
 
 router = DefaultRouter()
@@ -31,4 +31,5 @@ urlpatterns = [
     path('client-spending/', ClientSpendingView.as_view(), name='client-spending'),
     path('booking-config/', BookingConfigView.as_view(), name='booking-config'),
     path('special-price-config/', SpecialPriceConfigView.as_view(), name='special-price-config'),
+    path('message-automation-config/', MessageAutomationConfigView.as_view(), name='message-automation-config'),
 ]

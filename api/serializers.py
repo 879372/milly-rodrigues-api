@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.utils import timezone
 from decimal import Decimal
-from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig
+from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig, MessageAutomationConfig
 
 
 def _appointment_services_total(services, date_time):
@@ -312,3 +312,39 @@ class SpecialPriceConfigSerializer(serializers.ModelSerializer):
 
     def validate_special_price_days(self, value):
         return _validate_weekday_list(value)
+
+
+class MessageAutomationConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MessageAutomationConfig
+        fields = (
+            'follow_up_enabled', 'follow_up_template',
+            'review_enabled', 'review_template', 'google_review_url',
+            'return_enabled', 'return_template', 'updated_at',
+        )
+        read_only_fields = ('updated_at',)
+
+    def validate(self, attrs):
+        templates = (
+            ('follow_up_template', 'acompanhamento de 24 horas'),
+            ('review_template', 'avaliação de 48 horas'),
+            ('return_template', 'retorno de 30 dias'),
+        )
+        for field, label in templates:
+            value = attrs.get(field)
+            if value is not None and not value.strip():
+                raise serializers.ValidationError({field: f'A mensagem de {label} não pode ficar vazia.'})
+        return attrs
+
+    def update(self, instance, validated_data):
+        now = timezone.now()
+        for enabled_field, enabled_at_field in (
+            ('follow_up_enabled', 'follow_up_enabled_at'),
+            ('review_enabled', 'review_enabled_at'),
+            ('return_enabled', 'return_enabled_at'),
+        ):
+            if validated_data.get(enabled_field) is True and not getattr(instance, enabled_field):
+                setattr(instance, enabled_at_field, now)
+        if validated_data.get('google_review_url', '').strip() and not instance.google_review_url.strip():
+            instance.review_enabled_at = now
+        return super().update(instance, validated_data)
