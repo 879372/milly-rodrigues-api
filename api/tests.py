@@ -205,10 +205,11 @@ class InfinitePayBookingTests(APITestCase):
     def setUp(self):
         BookingPaymentConfig.objects.all().delete()
 
-    def _enable(self, handle='barbearia', days=None):
+    def _enable(self, handle='barbearia', days=None, deposit_percentage=100):
         cfg = BookingPaymentConfig.load()
         cfg.payment_days = days if days is not None else [0]  # MON = segunda (weekday 0)
         cfg.infinitepay_handle = handle
+        cfg.deposit_percentage = deposit_percentage
         cfg.save()
         return cfg
 
@@ -223,8 +224,9 @@ class InfinitePayBookingTests(APITestCase):
         self._enable()
         r = self.client.get('/api/v1/booking-config/')
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(r.data.keys()), {'payment_days'})
+        self.assertEqual(set(r.data.keys()), {'payment_days', 'deposit_percentage'})
         self.assertEqual(r.data['payment_days'], [0])
+        self.assertEqual(r.data['deposit_percentage'], 100)
 
     def test_config_hides_days_without_handle(self):
         cfg = BookingPaymentConfig.load()
@@ -249,6 +251,13 @@ class InfinitePayBookingTests(APITestCase):
         auth(self.client, admin)
         r = self.client.patch('/api/v1/booking-config/', {'payment_days': [7]}, format='json')
         self.assertEqual(r.status_code, 400)
+
+    def test_config_rejects_invalid_deposit_percentage(self):
+        admin = User.objects.create_user('adm_pct', password='Sup3rSenha!', role='admin')
+        auth(self.client, admin)
+        for value in (0, 101):
+            r = self.client.patch('/api/v1/booking-config/', {'deposit_percentage': value}, format='json')
+            self.assertEqual(r.status_code, 400)
 
     def test_disabled_keeps_legacy_flow(self):
         r = self.client.post('/api/v1/appointments/public_booking/', self._booking_payload(), format='json')
@@ -275,6 +284,28 @@ class InfinitePayBookingTests(APITestCase):
         self.assertEqual(appt.payment_status, 'pending')
         self.assertEqual(appt.payment_amount_cents, 5000)
         mock_link.assert_called_once()
+
+    @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/entrada', {}))
+    def test_percentage_charges_only_deposit_and_keeps_remaining_balance(self, mock_link):
+        self._enable(deposit_percentage=30)
+        r = self.client.post('/api/v1/appointments/public_booking/', self._booking_payload(), format='json')
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['deposit_percentage'], 30)
+        self.assertEqual(r.data['payment_amount'], '15.00')
+        self.assertEqual(r.data['remaining_amount'], '35.00')
+        appt = Appointment.objects.get(id=r.data['appointment_id'])
+        self.assertEqual(appt.total_price, 50)
+        self.assertEqual(appt.payment_amount_cents, 1500)
+        self.assertEqual(mock_link.call_args.kwargs['items'][0]['price'], 1500)
+
+        with patch('api.infinitepay.check_payment', return_value={'paid': True, 'paid_amount': 1500, 'capture_method': 'pix'}):
+            confirm = self.client.post('/api/v1/appointments/payment_confirm/', {'order_nsu': r.data['order_nsu']}, format='json')
+        self.assertTrue(confirm.data['paid'])
+        self.assertEqual(confirm.data['appointment']['paid_amount'], '15.00')
+        self.assertEqual(confirm.data['appointment']['remaining_amount'], '35.00')
+        appt.refresh_from_db()
+        self.assertEqual(appt.payments.first().amount, 15)
 
     @patch('api.infinitepay.create_link')
     def test_payment_checkout_accepts_long_provider_url(self, mock_link):
@@ -388,7 +419,8 @@ class InfinitePayBookingTests(APITestCase):
         taken.refresh_from_db()
         self.assertEqual(taken.status, 'confirmed')  # o outro agendamento não foi tocado
 
-    def test_staff_sees_internal_payment_fields_public_does_not(self):
+    @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/abc', {}))
+    def test_staff_sees_internal_payment_fields_public_does_not(self, _mock_link):
         self._enable()
         book = self.client.post('/api/v1/appointments/public_booking/', self._booking_payload(), format='json')
         appt_id = Appointment.objects.get(payment_order_nsu=book.data['order_nsu']).id

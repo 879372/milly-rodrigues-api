@@ -308,6 +308,7 @@ class BookingPaymentConfig(SingletonConfigModel):
     """
     payment_days = models.JSONField(default=list, blank=True)
     infinitepay_handle = models.CharField(max_length=100, blank=True, default='')
+    deposit_percentage = models.PositiveSmallIntegerField(default=100)
     hold_minutes = models.PositiveIntegerField(default=15)  # TTL de um checkout abandonado
     updated_at = models.DateTimeField(auto_now=True)
 

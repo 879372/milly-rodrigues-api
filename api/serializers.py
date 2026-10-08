@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.utils import timezone
+from decimal import Decimal
 from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig
 
 
@@ -119,6 +120,8 @@ class AppointmentSerializer(serializers.ModelSerializer):
     barber_phone = serializers.CharField(source='barber.phone', read_only=True)
     service_name = serializers.SerializerMethodField()
     services_details = serializers.SerializerMethodField()
+    paid_amount = serializers.SerializerMethodField()
+    remaining_amount = serializers.SerializerMethodField()
     skip_notification = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
@@ -147,6 +150,21 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def get_services_details(self, obj):
         return [{'id': s.id, 'name': s.name, 'price': s.price, 'duration_minutes': s.duration_minutes} for s in obj.services.all()]
+
+    def get_paid_amount(self, obj):
+        return f'{self._paid_amount(obj):.2f}'
+
+    def get_remaining_amount(self, obj):
+        total = (obj.total_price or Decimal('0.00')) - (obj.discount or Decimal('0.00'))
+        return f'{max(total - self._paid_amount(obj), Decimal("0.00")):.2f}'
+
+    @staticmethod
+    def _paid_amount(obj):
+        if not hasattr(obj, '_serialized_paid_amount'):
+            obj._serialized_paid_amount = sum(
+                (payment.amount for payment in obj.payments.all()), Decimal('0.00')
+            )
+        return obj._serialized_paid_amount
 
     def create(self, validated_data):
         services = validated_data.pop('services', [])
@@ -269,7 +287,7 @@ class BookingPaymentConfigSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BookingPaymentConfig
-        fields = ('payment_days', 'infinitepay_handle', 'hold_minutes', 'payment_enabled', 'updated_at')
+        fields = ('payment_days', 'infinitepay_handle', 'deposit_percentage', 'hold_minutes', 'payment_enabled', 'updated_at')
         read_only_fields = ('updated_at',)
 
     def validate_payment_days(self, value):
@@ -278,6 +296,11 @@ class BookingPaymentConfigSerializer(serializers.ModelSerializer):
     def validate_hold_minutes(self, value):
         if value < 1 or value > 120:
             raise serializers.ValidationError('Use um valor entre 1 e 120 minutos.')
+        return value
+
+    def validate_deposit_percentage(self, value):
+        if value < 1 or value > 100:
+            raise serializers.ValidationError('Use uma porcentagem entre 1% e 100%.')
         return value
 
 

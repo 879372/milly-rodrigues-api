@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.db.models import Sum, Count
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 from uuid import uuid4
 from .models import User, Service, Product, Appointment, Payment, Expense, Goal, WorkingHour, TimeBlock, Notification, ProductSale, PaymentMethod, Sale, WaitlistEntry, BookingPaymentConfig, SpecialPriceConfig
 from .serializers import (
@@ -240,9 +241,8 @@ def _settle_appointment_payment(appointment, *, transaction_nsu='', slug='', cap
 class BookingConfigView(APIView):
     """Configuração do pagamento antecipado (singleton).
 
-    GET  público  -> apenas ``{"payment_days": [...]}`` (dias, 0=Segunda..6=Domingo,
-                     que o portal deve mandar pro checkout). Vazio se não houver
-                     handle configurado. Não expõe a InfiniteTag.
+    GET  público  -> dias e porcentagem de entrada usados pelo portal. Vazio se não
+                     houver handle configurado. Não expõe a InfiniteTag.
     GET  admin    -> objeto completo (handle, hold_minutes...).
     PATCH admin   -> atualiza a configuração.
     """
@@ -256,7 +256,10 @@ class BookingConfigView(APIView):
         if _is_admin_request(request):
             return Response(BookingPaymentConfigSerializer(cfg).data)
         days = cfg.active_days() if cfg.effective_handle() else []
-        return Response({'payment_days': days})
+        return Response({
+            'payment_days': days,
+            'deposit_percentage': cfg.deposit_percentage,
+        })
 
     def patch(self, request):
         cfg = BookingPaymentConfig.load()
@@ -793,6 +796,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
     def _payment_summary(self, appointment):
         local_dt = timezone.localtime(appointment.date_time)
+        paid = sum((payment.amount for payment in appointment.payments.all()), Decimal('0.00'))
+        remaining = max((appointment.total_price or Decimal('0.00')) - paid, Decimal('0.00'))
         return {
             'service_name': ", ".join(s.name for s in appointment.services.all()),
             'barber_name': appointment.barber.get_full_name() if appointment.barber else '',
@@ -801,6 +806,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             'date': local_dt.strftime('%d/%m/%Y'),
             'time': local_dt.strftime('%H:%M'),
             'total_price': str(appointment.total_price or ''),
+            'paid_amount': f'{paid:.2f}',
+            'remaining_amount': f'{remaining:.2f}',
             'portal_token': make_portal_token(appointment.client_id) if appointment.client_id else '',
         }
 
@@ -1150,6 +1157,10 @@ class AppointmentViewSet(viewsets.ModelViewSet):
 
                 cfg = BookingPaymentConfig.load()
                 payment_required = bool(date_time) and cfg.requires_payment_on(timezone.localtime(date_time).weekday())
+                deposit_amount = (
+                    (total_price * Decimal(cfg.deposit_percentage) / Decimal('100'))
+                    .quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                ) if payment_required else None
 
                 # Se passou por tudo e não tem conflito, cria o agendamento de forma segura
                 appointment = Appointment(
@@ -1159,7 +1170,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                     total_price=total_price,
                     status='pending' if payment_required else 'confirmed',
                     payment_status='pending' if payment_required else 'not_required',
-                    payment_amount_cents=int(round(float(total_price) * 100)) if payment_required else None,
+                    payment_amount_cents=max(1, int(deposit_amount * 100)) if payment_required else None,
                     payment_order_nsu=f"apt-{uuid4().hex[:16]}" if payment_required else '',
                     notes=notes
                 )
@@ -1250,6 +1261,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             'checkout_url': checkout_url,
             'order_nsu': appointment.payment_order_nsu,
             'appointment_id': appointment.id,
+            'deposit_percentage': cfg.deposit_percentage,
+            'payment_amount': f'{Decimal(appointment.payment_amount_cents) / Decimal("100"):.2f}',
+            'remaining_amount': f'{max((appointment.total_price or Decimal("0.00")) - (Decimal(appointment.payment_amount_cents) / Decimal("100")), Decimal("0.00")):.2f}',
             'special_pricing_applied': is_special_day,
         })
 
