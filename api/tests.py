@@ -125,6 +125,25 @@ class RoleMatrixTests(APITestCase):
         self.assertNotIn('internal_notes', r.json().get('user', {}))
         self.assertNotIn('email', r.json().get('user', {}))
 
+    def test_public_registration_requires_and_saves_valid_email(self):
+        base = {
+            'name': 'Cliente Portal', 'phone': '11877776666',
+            'birth_date': '1995-05-20',
+        }
+        self.assertEqual(self.client.post('/api/v1/users/register_client/', base, format='json').status_code, 400)
+        invalid = {**base, 'email': 'email-invalido'}
+        self.assertEqual(self.client.post('/api/v1/users/register_client/', invalid, format='json').status_code, 400)
+
+        valid = {**base, 'email': 'cliente.portal@example.com'}
+        created = self.client.post('/api/v1/users/register_client/', valid, format='json')
+
+        self.assertEqual(created.status_code, 200)
+        self.assertTrue(created.data['has_email'])
+        self.assertEqual(User.objects.get(phone='11877776666').email, 'cliente.portal@example.com')
+        lookup = self.client.get('/api/v1/users/check_phone/?phone=11877776666')
+        self.assertTrue(lookup.data['user']['has_email'])
+        self.assertNotIn('email', lookup.data['user'])
+
     # F05 — isolamento de agenda por barbeiro
     def test_barber_only_sees_own_appointments(self):
         auth(self.client, self.barber)
@@ -216,6 +235,7 @@ class InfinitePayBookingTests(APITestCase):
     def _booking_payload(self, when=MON):
         return {
             'name': 'Cliente Teste', 'phone': '11999990000',
+            'email': 'cliente@example.com',
             'services_ids': [self.svc.id], 'barber_id': self.barber.id,
             'date_time': when.isoformat(),
         }
@@ -284,7 +304,7 @@ class InfinitePayBookingTests(APITestCase):
         self.assertEqual(appt.payment_status, 'pending')
         self.assertEqual(appt.payment_amount_cents, 5000)
         mock_link.assert_called_once()
-        self.assertNotIn('email', mock_link.call_args.kwargs['customer'])
+        self.assertEqual(mock_link.call_args.kwargs['customer']['email'], 'cliente@example.com')
 
     @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/abc', {}))
     def test_checkout_only_sends_valid_customer_email(self, mock_link):
@@ -293,11 +313,23 @@ class InfinitePayBookingTests(APITestCase):
             'cliente_email', role='client', phone='11999990000',
             first_name='Cliente', email='cliente@example.com',
         )
+        payload = self._booking_payload()
+        payload.pop('email')
 
-        r = self.client.post('/api/v1/appointments/public_booking/', self._booking_payload(), format='json')
+        r = self.client.post('/api/v1/appointments/public_booking/', payload, format='json')
 
         self.assertEqual(r.status_code, 200)
         self.assertEqual(mock_link.call_args.kwargs['customer']['email'], 'cliente@example.com')
+
+    def test_public_booking_rejects_invalid_email(self):
+        payload = self._booking_payload()
+        payload['email'] = 'email-invalido'
+
+        r = self.client.post('/api/v1/appointments/public_booking/', payload, format='json')
+
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('e-mail válido', r.data['error'])
+        self.assertFalse(Appointment.objects.exists())
 
     @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/entrada', {}))
     def test_percentage_charges_only_deposit_and_keeps_remaining_balance(self, mock_link):
@@ -529,6 +561,7 @@ class SpecialPriceTests(APITestCase):
     def _booking_payload(self, services_ids, when=MON):
         return {
             'name': 'Cliente Teste', 'phone': '11999991111',
+            'email': 'cliente@example.com',
             'services_ids': services_ids, 'barber_id': self.barber.id,
             'date_time': when.isoformat(),
         }

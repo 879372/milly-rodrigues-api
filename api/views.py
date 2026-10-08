@@ -388,12 +388,14 @@ class UserViewSet(viewsets.ModelViewSet):
         user = User.objects.filter(phone=clean_phone, role='client').first()
         if user:
             # Resposta mínima para pré-preencher o formulário de agendamento.
-            # NÃO expõe internal_notes / email / debt_balance / id.
+            # NÃO expõe internal_notes / email / debt_balance / id. Informa apenas
+            # se o cadastro já possui e-mail para o portal decidir se mostra o campo.
             return Response({
                 'exists': True,
                 'user': {
                     'first_name': user.first_name or '',
                     'birth_date': user.birth_date,
+                    'has_email': bool((user.email or '').strip()),
                 },
             })
         return Response({'exists': False})
@@ -403,6 +405,7 @@ class UserViewSet(viewsets.ModelViewSet):
         name = request.data.get('name')
         phone = request.data.get('phone')
         birth_date = request.data.get('birth_date')
+        email = (request.data.get('email') or '').strip().lower()
 
         import re
         clean_phone = re.sub(r'\D', '', phone) if phone else ''
@@ -411,12 +414,21 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Telefone é obrigatório'}, status=400)
 
         client = User.objects.filter(phone=clean_phone, role='client').first()
+        if not email and not (client and (client.email or '').strip()):
+            return Response({'error': 'E-mail é obrigatório'}, status=400)
+        if email:
+            try:
+                validate_email(email)
+            except ValidationError:
+                return Response({'error': 'Informe um e-mail válido'}, status=400)
+
         if not client:
             client = User.objects.create(
                 phone=clean_phone,
                 username=f"user_{clean_phone}",
                 first_name=name or '',
                 birth_date=birth_date if birth_date else None,
+                email=email,
                 role='client',
             )
         else:
@@ -428,10 +440,18 @@ class UserViewSet(viewsets.ModelViewSet):
             if birth_date and not client.birth_date:
                 client.birth_date = birth_date
                 changed = True
+            if email and not client.email:
+                client.email = email
+                changed = True
             if changed:
                 client.save()
 
-        return Response({'id': client.id, 'first_name': client.first_name, 'birth_date': client.birth_date})
+        return Response({
+            'id': client.id,
+            'first_name': client.first_name,
+            'birth_date': client.birth_date,
+            'has_email': bool((client.email or '').strip()),
+        })
 
     @action(detail=False, methods=['get'])
     def me(self, request):
@@ -1041,6 +1061,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         name = request.data.get('name')
         phone = request.data.get('phone')
         birth_date = request.data.get('birth_date')
+        submitted_email = (request.data.get('email') or '').strip().lower()
         
         import re
         clean_phone = re.sub(r'\D', '', phone) if phone else ''
@@ -1056,6 +1077,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # 1. Find or create client (identifying ONLY by phone)
         client = User.objects.filter(phone=clean_phone, role='client').first()
         created = False
+
+        if not submitted_email and not (client and (client.email or '').strip()):
+            return Response({'error': 'E-mail é obrigatório para realizar o agendamento.'}, status=400)
+        if submitted_email:
+            try:
+                validate_email(submitted_email)
+            except ValidationError:
+                return Response({'error': 'Informe um e-mail válido.'}, status=400)
         
         if not client:
             # Create new client if not found
@@ -1064,6 +1093,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 username=f"user_{clean_phone}",
                 first_name=name or '',
                 birth_date=birth_date,
+                email=submitted_email,
                 role='client'
             )
             created = True
@@ -1077,9 +1107,12 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             if birth_date and not client.birth_date:
                 client.birth_date = birth_date
                 changed = True
+            if submitted_email and not client.email:
+                client.email = submitted_email
+                changed = True
             if changed:
                 client.save()
-        
+
         notes = request.data.get('notes')
         
         from django.db import transaction
