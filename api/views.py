@@ -1916,7 +1916,7 @@ class DebtsView(APIView):
                     'client_id': app.client.id if app.client else None,
                     'client_name': app.client.get_full_name() if app.client else 'Cliente Anônimo',
                     'date': app.date_time.isoformat(),
-                    'description': f"Corte: {', '.join([s.name for s in app.services.all()]) if app.services.exists() else 'Serviço'}",
+                    'description': f"Serviço: {', '.join([s.name for s in app.services.all()]) if app.services.exists() else 'Serviço'}",
                     'total_price': expected,
                     'total_paid': paid,
                     'remaining_debt': expected - paid
