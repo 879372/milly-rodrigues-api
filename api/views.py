@@ -3,6 +3,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.db.models import Sum, Count
 from django_filters.rest_framework import DjangoFilterBackend
 from datetime import datetime, timedelta
@@ -1206,12 +1208,16 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         phone_digits = re.sub(r'\D', '', client.phone or '')
         if phone_digits:
             customer["phone_number"] = f"+55{phone_digits}" if len(phone_digits) <= 11 else f"+{phone_digits}"
-        # Não pedimos e-mail no portal; a InfinitePay exige um na tela de pagamento.
-        # Usa o e-mail do cadastro se houver, senão um placeholder (evita o cliente digitar).
-        customer["email"] = client.email or (
-            f"cliente{phone_digits or appointment.payment_order_nsu.replace('apt-', '')}"
-            "@nao-informado.millyrodrigues.local"
-        )
+        # Dados do cliente são opcionais na API da InfinitePay. Só envie e-mail real e
+        # válido: domínios artificiais como ``.local`` são rejeitados com HTTP 422.
+        customer_email = (client.email or '').strip()
+        if customer_email:
+            try:
+                validate_email(customer_email)
+            except ValidationError:
+                logger.warning("E-mail inválido omitido do checkout do agendamento %s", appointment.pk)
+            else:
+                customer["email"] = customer_email
 
         api_base = os.getenv('PUBLIC_API_BASE_URL', '').rstrip('/') or request.build_absolute_uri('/').rstrip('/')
         redirect_url = f"{portal_base_url()}/agendar/pagamento?order_nsu={appointment.payment_order_nsu}"

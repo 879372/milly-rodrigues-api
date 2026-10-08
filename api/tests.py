@@ -284,6 +284,20 @@ class InfinitePayBookingTests(APITestCase):
         self.assertEqual(appt.payment_status, 'pending')
         self.assertEqual(appt.payment_amount_cents, 5000)
         mock_link.assert_called_once()
+        self.assertNotIn('email', mock_link.call_args.kwargs['customer'])
+
+    @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/abc', {}))
+    def test_checkout_only_sends_valid_customer_email(self, mock_link):
+        self._enable()
+        User.objects.create_user(
+            'cliente_email', role='client', phone='11999990000',
+            first_name='Cliente', email='cliente@example.com',
+        )
+
+        r = self.client.post('/api/v1/appointments/public_booking/', self._booking_payload(), format='json')
+
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(mock_link.call_args.kwargs['customer']['email'], 'cliente@example.com')
 
     @patch('api.infinitepay.create_link', return_value=('https://pay.infinitepay.io/entrada', {}))
     def test_percentage_charges_only_deposit_and_keeps_remaining_balance(self, mock_link):
