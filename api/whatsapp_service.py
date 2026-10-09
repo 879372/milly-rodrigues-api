@@ -2,6 +2,7 @@ import logging
 import requests
 import os
 import re
+from django.db import transaction
 from django.utils import timezone
 from .models import Notification
 from .portal import make_portal_token, portal_base_url
@@ -40,19 +41,47 @@ def _render_template(template, appointment, review_url=''):
         message = message.replace(placeholder, value)
     return message
 
+# Tentativas permitidas quando a API recusa a mensagem explicitamente.
+MAX_SEND_ATTEMPTS = 2
+
+
+def _claim_notification(appointment, message_type, content):
+    """Reserva o envio de um tipo de mensagem para o agendamento.
+
+    Retorna None se o envio já foi feito, está em andamento, teve resultado
+    incerto ou esgotou as tentativas. A trava na linha do agendamento impede
+    que requisições simultâneas (ex.: clique duplo) enviem a mesma mensagem.
+    """
+    from .models import Appointment
+
+    with transaction.atomic():
+        Appointment.objects.select_for_update().filter(pk=appointment.pk).first()
+        previous = Notification.objects.filter(appointment=appointment, type=message_type)
+        if previous.filter(status__in=('sent', 'pending')).exists():
+            return None
+        if previous.filter(status='failed').count() >= MAX_SEND_ATTEMPTS:
+            return None
+        return Notification.objects.create(
+            appointment=appointment,
+            type=message_type,
+            message=content,
+            status='pending',
+        )
+
+
 class WhatsAppService:
     @staticmethod
     def send_message(appointment, message_type, content):
         """
         Sends a WhatsApp message using the configured provider (Evolution API).
+
+        Retorna True se enviou, False se a API recusou e None se o envio foi
+        ignorado por já existir uma mensagem desse tipo para o agendamento.
         """
-        # 1. Create notification log
-        notification = Notification.objects.create(
-            appointment=appointment,
-            type=message_type,
-            message=content,
-            status='pending'
-        )
+        # 1. Create notification log (only once per appointment and type)
+        notification = _claim_notification(appointment, message_type, content)
+        if notification is None:
+            return None
 
         # 2. Get configuration
         api_url = os.getenv('WHATSAPP_API_URL')
@@ -68,8 +97,7 @@ class WhatsAppService:
 
         # 3. Sending process via Evolution API
         try:
-            import re
-            phone = re.sub(r'\D', '', appointment.client.phone)
+            phone = re.sub(r'\D', '', appointment.client.phone or '')
             if len(phone) <= 11:
                 phone = f"55{phone}"
             
@@ -90,23 +118,27 @@ class WhatsAppService:
             }
             
             response = requests.post(endpoint, json=payload, headers=headers, timeout=10)
-            
-            if response.status_code in [200, 201]:
-                notification.status = 'sent'
-                notification.sent_at = timezone.now()
-                notification.save()
-                return True
-            else:
-                logger.error(f"WHATSAPP API ERROR: {response.status_code} - {response.text}")
-                notification.status = 'failed'
-                notification.save()
-                return False
-
+        except requests.exceptions.ReadTimeout as e:
+            # A mensagem pode ter sido entregue mesmo sem resposta: fica 'pending'
+            # para nunca ser reenviada automaticamente.
+            logger.error(f"WHATSAPP SEND UNCERTAIN (notification {notification.pk}): {str(e)}")
+            return False
         except Exception as e:
             logger.error(f"WHATSAPP SEND FAILED: {str(e)}")
             notification.status = 'failed'
             notification.save()
             return False
+
+        if response.status_code in [200, 201]:
+            notification.status = 'sent'
+            notification.sent_at = timezone.now()
+            notification.save()
+            return True
+
+        logger.error(f"WHATSAPP API ERROR: {response.status_code} - {response.text}")
+        notification.status = 'failed'
+        notification.save()
+        return False
 
     @classmethod
     def send_confirmation(cls, appointment):

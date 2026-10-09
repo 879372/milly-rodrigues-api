@@ -1,8 +1,9 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
+from django.db.models import Count, Q
 from api.models import Appointment, Notification, MessageAutomationConfig
-from api.whatsapp_service import WhatsAppService
+from api.whatsapp_service import MAX_SEND_ATTEMPTS, WhatsAppService
 
 class Command(BaseCommand):
     help = 'Envia lembretes de agendamento e mensagens pós-atendimento via WhatsApp'
@@ -15,7 +16,15 @@ class Command(BaseCommand):
                 completed_at__gte=enabled_at,
                 completed_at__lte=now - delay,
             )
-            .exclude(notifications__type=notification_type, notifications__status='sent')
+            .exclude(
+                notifications__type=notification_type,
+                notifications__status__in=('sent', 'pending'),
+            )
+            .annotate(failed_attempts=Count(
+                'notifications',
+                filter=Q(notifications__type=notification_type, notifications__status='failed'),
+            ))
+            .filter(failed_attempts__lt=MAX_SEND_ATTEMPTS)
             .select_related('client', 'barber')
             .prefetch_related('services')
             .order_by('completed_at')
@@ -48,14 +57,31 @@ class Command(BaseCommand):
             for app in self._due_appointments(now, delay, enabled_at, notification_type):
                 if notification_type == 'review_request':
                     has_previous_procedure = Appointment.objects.filter(
+                        Q(date_time__lt=app.date_time) | Q(date_time=app.date_time, pk__lt=app.pk),
                         client_id=app.client_id,
                         status='completed',
-                        date_time__lt=app.date_time,
-                    ).exclude(pk=app.pk).exists()
-                    if has_previous_procedure:
+                    ).exists()
+                    already_asked = Notification.objects.filter(
+                        appointment__client_id=app.client_id,
+                        type='review_request',
+                        status__in=('sent', 'pending'),
+                    ).exists()
+                    if has_previous_procedure or already_asked:
                         continue
 
-                if sender(app):
+                if notification_type == 'return_reminder':
+                    # A cliente já voltou ou já tem horário marcado depois deste atendimento.
+                    has_later_visit = Appointment.objects.filter(
+                        client_id=app.client_id,
+                        date_time__gt=app.date_time,
+                    ).exclude(status__in=('cancelled', 'no_show')).exists()
+                    if has_later_visit:
+                        continue
+
+                result = sender(app)
+                if result is None:
+                    continue
+                if result:
                     sent_count += 1
                     self.stdout.write(self.style.SUCCESS(
                         f'{notification_type} enviado para {app.client.first_name}'
@@ -106,20 +132,15 @@ class Command(BaseCommand):
 
         sent_count = 0
         for app in appointments:
-            # Verificar se já enviamos lembrete para este agendamento
-            already_sent = Notification.objects.filter(
-                appointment=app,
-                type='reminder',
-                status='sent'
-            ).exists()
-
-            if not already_sent:
-                success = WhatsAppService.send_reminder(app)
-                if success:
-                    sent_count += 1
-                    self.stdout.write(self.style.SUCCESS(f'Lembrete enviado para {app.client.first_name}'))
-                else:
-                    self.stdout.write(self.style.ERROR(f'Falha ao enviar para {app.client.first_name}'))
+            # send_reminder ignora (None) agendamentos que já tiveram lembrete
+            success = WhatsAppService.send_reminder(app)
+            if success is None:
+                continue
+            if success:
+                sent_count += 1
+                self.stdout.write(self.style.SUCCESS(f'Lembrete enviado para {app.client.first_name}'))
+            else:
+                self.stdout.write(self.style.ERROR(f'Falha ao enviar para {app.client.first_name}'))
 
         post_service_count = self._send_post_service_automations(now)
         self.stdout.write(

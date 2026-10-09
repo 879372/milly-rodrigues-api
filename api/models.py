@@ -104,6 +104,14 @@ class Appointment(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True, db_index=True)
     history = HistoricalRecords()
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        # Status lido do banco: permite notificar só quando o status muda de fato.
+        if 'status' in field_names:
+            instance._loaded_status = values[field_names.index('status')]
+        return instance
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get('update_fields')
         completed_at_changed = False
