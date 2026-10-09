@@ -1330,7 +1330,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         discount = request.data.get('discount', 0.00)
         tip = request.data.get('tip', 0.00)
         
-        total_paid = sum(float(p['amount']) for p in payments_data)
+        # A entrada paga pela InfinitePay é preservada pelo servidor: a tela envia
+        # apenas o que foi recebido no balcão.
+        online = appointment.online_payment()
+        online_amount = float(online[0]) if online else 0.0
+        total_paid = online_amount + sum(float(p['amount']) for p in payments_data)
         
         service_total = float(appointment.total_price) - float(discount)
         maximum_payment_total = service_total + float(tip)
@@ -1342,12 +1346,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 'error': f'A soma dos pagamentos (R$ {total_paid:.2f}) excede o valor máximo permitido (R$ {maximum_payment_total:.2f}).'
             }, status=400)
             
-        # Substitui os pagamentos (semântica igual à do partial_update). Assim, quando um
-        # agendamento já vem pago pela InfinitePay, o pagamento pré-preenchido reenviado
-        # pela tela substitui o lançamento anterior em vez de duplicá-lo.
         from django.db import transaction
         with transaction.atomic():
             appointment.payments.all().delete()
+            if online:
+                amount, method, paid_on = online
+                Payment.objects.create(
+                    appointment=appointment, method=method, amount=amount, payment_date=paid_on,
+                )
             for p_data in payments_data:
                 payment_kwargs = {
                     'appointment': appointment,

@@ -215,6 +215,54 @@ from .models import WorkingHour, BookingPaymentConfig
 MON = timezone.make_aware(_dt.datetime(2026, 9, 7, 14, 0))  # segunda-feira
 
 
+class DepositCheckoutTests(APITestCase):
+    """Concluir atendimento com entrada já paga pela InfinitePay."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user('dep_admin', password='Sup3rSenha!', role='admin')
+        self.customer = User.objects.create_user('dep_customer', password='Sup3rSenha!', role='client')
+        self.appointment = Appointment.objects.create(
+            client=self.customer,
+            barber=self.admin,
+            date_time=D1,
+            total_price='20.00',
+            status='confirmed',
+            payment_status='paid',
+            payment_amount_cents=600,
+            payment_capture_method='pix',
+            payment_confirmed_at=D1,
+        )
+        Payment.objects.create(appointment=self.appointment, method='pix', amount='6.00', payment_date=D1.date())
+        auth(self.client, self.admin)
+
+    def _complete(self, payments):
+        return self.client.post(
+            f'/api/v1/appointments/{self.appointment.id}/complete_with_payments/',
+            {'payments': payments, 'discount': '0', 'tip': '0'},
+            format='json',
+            secure=True,
+        )
+
+    def test_exposes_online_paid_amount(self):
+        r = self.client.get(f'/api/v1/appointments/{self.appointment.id}/', secure=True)
+        self.assertEqual(r.data['online_paid_amount'], '6.00')
+        self.assertEqual(r.data['remaining_amount'], '14.00')
+
+    def test_only_remaining_is_charged_and_deposit_is_kept(self):
+        r = self._complete([{'method': 'cash', 'amount': '14.00'}])
+        self.assertEqual(r.status_code, 200)
+
+        amounts = sorted((p.method, str(p.amount)) for p in self.appointment.payments.all())
+        self.assertEqual(amounts, [('cash', '14.00'), ('pix', '6.00')])
+        debts = self.client.get('/api/v1/debts/', secure=True)
+        self.assertFalse(any(d['id'] == self.appointment.id and d['type'] == 'appointment' for d in debts.data))
+
+    def test_charging_full_price_again_is_rejected(self):
+        r = self._complete([{'method': 'pix', 'amount': '20.00'}])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(self.appointment.payments.count(), 1)
+
+
 class InfinitePayBookingTests(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -414,11 +462,12 @@ class InfinitePayBookingTests(APITestCase):
         self.assertEqual(mock_check.call_count, 1)  # não reconsulta após pago
         self.assertEqual(appt.payments.count(), 1)  # não duplica
 
-        # Concluir o atendimento não deve duplicar o pagamento já recebido.
+        # Concluir o atendimento mantém o pagamento online sem duplicá-lo: a tela
+        # envia apenas o que foi recebido no balcão (nada, neste caso).
         admin = User.objects.create_user('adm_done', password='Sup3rSenha!', role='admin')
         auth(self.client, admin)
         r3 = self.client.post(f'/api/v1/appointments/{appt.id}/complete_with_payments/',
-                              {'payments': [{'method': 'pix', 'amount': '50.00'}], 'discount': 0, 'tip': 0},
+                              {'payments': [], 'discount': 0, 'tip': 0},
                               format='json')
         self.assertEqual(r3.status_code, 200)
         appt.refresh_from_db()

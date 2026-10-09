@@ -1,4 +1,5 @@
 import os
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from simple_history.models import HistoricalRecords
@@ -111,6 +112,22 @@ class Appointment(models.Model):
         if 'status' in field_names:
             instance._loaded_status = values[field_names.index('status')]
         return instance
+
+    def online_payment(self):
+        """Entrada já recebida pela InfinitePay: (valor, método, data) ou None."""
+        if self.payment_status != 'paid':
+            return None
+        amount = (
+            Decimal(self.payment_amount_cents) / 100
+            if self.payment_amount_cents
+            else (self.total_price or Decimal('0.00'))
+        ).quantize(Decimal('0.01'))
+        method = 'credit' if self.payment_capture_method in ('credit_card', 'credit') else 'pix'
+        paid_on = (
+            timezone.localdate(self.payment_confirmed_at)
+            if self.payment_confirmed_at else timezone.localdate()
+        )
+        return amount, method, paid_on
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get('update_fields')

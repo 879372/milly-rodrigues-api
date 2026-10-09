@@ -122,6 +122,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
     services_details = serializers.SerializerMethodField()
     paid_amount = serializers.SerializerMethodField()
     remaining_amount = serializers.SerializerMethodField()
+    online_paid_amount = serializers.SerializerMethodField()
     skip_notification = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
@@ -157,6 +158,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
     def get_remaining_amount(self, obj):
         total = (obj.total_price or Decimal('0.00')) - (obj.discount or Decimal('0.00'))
         return f'{max(total - self._paid_amount(obj), Decimal("0.00")):.2f}'
+
+    def get_online_paid_amount(self, obj):
+        online = obj.online_payment()
+        return f'{online[0]:.2f}' if online else '0.00'
 
     @staticmethod
     def _paid_amount(obj):
