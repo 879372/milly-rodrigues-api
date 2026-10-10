@@ -1,7 +1,7 @@
 """Testes de autorização (matriz papel x endpoint) para os achados da auditoria."""
 import datetime
 from django.utils import timezone
-from rest_framework.test import APITestCase
+from .test_utils import IsolatedCacheAPITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import User, Service, Appointment, Payment
@@ -15,8 +15,9 @@ def auth(client, user):
     client.credentials(HTTP_AUTHORIZATION=f'Bearer {RefreshToken.for_user(user).access_token}')
 
 
-class TipDebtTests(APITestCase):
+class TipDebtTests(IsolatedCacheAPITestCase):
     def setUp(self):
+        super().setUp()
         self.admin = User.objects.create_user('tip_admin', password='Sup3rSenha!', role='admin')
         self.customer = User.objects.create_user('tip_customer', password='Sup3rSenha!', role='client')
         self.appointment = Appointment.objects.create(
@@ -48,7 +49,7 @@ class TipDebtTests(APITestCase):
         self.assertIsNotNone(self.appointment.completed_at)
 
 
-class RoleMatrixTests(APITestCase):
+class RoleMatrixTests(IsolatedCacheAPITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.admin = User.objects.create_user('admin1', password='Sup3rSenha!', role='admin')
@@ -215,10 +216,11 @@ from .models import WorkingHour, BookingPaymentConfig
 MON = timezone.make_aware(_dt.datetime(2026, 9, 7, 14, 0))  # segunda-feira
 
 
-class DepositCheckoutTests(APITestCase):
+class DepositCheckoutTests(IsolatedCacheAPITestCase):
     """Concluir atendimento com entrada já paga pela InfinitePay."""
 
     def setUp(self):
+        super().setUp()
         self.admin = User.objects.create_user('dep_admin', password='Sup3rSenha!', role='admin')
         self.customer = User.objects.create_user('dep_customer', password='Sup3rSenha!', role='client')
         self.appointment = Appointment.objects.create(
@@ -263,7 +265,7 @@ class DepositCheckoutTests(APITestCase):
         self.assertEqual(self.appointment.payments.count(), 1)
 
 
-class InfinitePayBookingTests(APITestCase):
+class InfinitePayBookingTests(IsolatedCacheAPITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.barber = User.objects.create_user('barb_ip', password='Sup3rSenha!', role='barber',
@@ -273,6 +275,7 @@ class InfinitePayBookingTests(APITestCase):
         cls.svc = Service.objects.create(name='Corte', price=50, duration_minutes=30)
 
     def setUp(self):
+        super().setUp()
         BookingPaymentConfig.objects.all().delete()
 
     def _enable(self, handle='barbearia', days=None, deposit_percentage=100):
@@ -597,7 +600,7 @@ class InfinitePayBookingTests(APITestCase):
 from .models import SpecialPriceConfig
 
 
-class SpecialPriceTests(APITestCase):
+class SpecialPriceTests(IsolatedCacheAPITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.barber = User.objects.create_user('barb_sp', password='Sup3rSenha!', role='barber',
@@ -608,6 +611,7 @@ class SpecialPriceTests(APITestCase):
         cls.svc_no_promo = Service.objects.create(name='Barba', price=20, duration_minutes=15)
 
     def setUp(self):
+        super().setUp()
         SpecialPriceConfig.objects.all().delete()
 
     def _booking_payload(self, services_ids, when=MON):
