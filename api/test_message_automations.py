@@ -6,7 +6,7 @@ from django.core.management import call_command
 from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.test import APIClient
+from .test_utils import IsolatedCacheAPITestCase
 
 from .models import (
     Appointment,
@@ -18,11 +18,11 @@ from .models import (
 from .whatsapp_service import WhatsAppService, _render_template
 
 
-class MessageAutomationConfigApiTests(TestCase):
+class MessageAutomationConfigApiTests(IsolatedCacheAPITestCase):
     def setUp(self):
+        super().setUp()
         self.admin = User.objects.create_user(username='admin-auto', password='test-pass', role='admin')
         self.professional = User.objects.create_user(username='pro-auto', password='test-pass', role='barber')
-        self.client = APIClient()
 
     def test_admin_can_update_templates(self):
         self.client.force_authenticate(self.admin)
